@@ -1,0 +1,224 @@
+# secure-agent-platform — local stack.
+#
+# Profiles (keep the default tiny; do NOT run keycloak + observability together
+# on a ~2GB machine):
+#   default          postgres + control-plane + mock-oidc + agent-worker + frontend
+#   keycloak         swap the mock IdP for real Keycloak
+#   observability    otel-collector + jaeger + prometheus + grafana
+#
+# Run a profile with `--profile <name>` (or COMPOSE_PROFILES). To repoint the
+# control plane at Keycloak in one command, layer the override file:
+#   docker compose -f docker-compose.yaml -f docker-compose.keycloak.yaml \
+#     --profile keycloak up -d --build
+# For observability, set OTEL_EXPORTER_OTLP_ENDPOINT (see deploy/compose/README.md).
+name: secure-agent-platform
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: sap-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sap}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_BOOTSTRAP_PASSWORD:-bootstrap_dev_pw}
+      # Consumed by the initdb role-bootstrap script:
+      POSTGRES_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD:-sap_owner_dev_pw}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-sap_app_dev_pw}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-sap_migrator_dev_pw}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=50
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-sap}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  # ---- Default identity provider: the lightweight Go mock OIDC (zero RAM) ----
+  mock-oidc:
+    build:
+      context: ../..
+      dockerfile: control-plane/Dockerfile
+      args:
+        CMD: mock-oidc
+    container_name: sap-mock-oidc
+    environment:
+      MOCK_OIDC_ADDR: ":9000"
+      # The browser reaches the IdP at localhost:9000, so tokens must carry that
+      # issuer. The control plane fetches discovery/JWKS at http://mock-oidc:9000.
+      MOCK_OIDC_ISSUER: "http://localhost:9000"
+      MOCK_OIDC_CLIENT_ID: "sap-dashboard"
+      MOCK_OIDC_API_AUDIENCE: "sap-control-plane"
+    ports:
+      - "9000:9000"
+
+  # ---- Go control plane: REST + SSE API and the gRPC tool proxy ----
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: control-plane/Dockerfile
+      args:
+        CMD: controlplane
+    container_name: sap-control-plane
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-oidc:
+        condition: service_started
+    environment:
+      CONTROL_PLANE_HTTP_ADDR: ":8080"
+      CONTROL_PLANE_GRPC_ADDR: ":9090"
+      WORKER_GRPC_ADDR: "agent-worker:50051"
+      DATABASE_URL: "postgres://sap_app:${POSTGRES_APP_PASSWORD:-sap_app_dev_pw}@postgres:5432/${POSTGRES_DB:-sap}?sslmode=disable"
+      MIGRATE_DATABASE_URL: "pgx5://sap_owner:${POSTGRES_OWNER_PASSWORD:-sap_owner_dev_pw}@postgres:5432/${POSTGRES_DB:-sap}?sslmode=disable"
+      MIGRATOR_DATABASE_URL: "postgres://sap_migrator:${POSTGRES_MIGRATOR_PASSWORD:-sap_migrator_dev_pw}@postgres:5432/${POSTGRES_DB:-sap}?sslmode=disable"
+      OIDC_ISSUER_URL: "http://localhost:9000"
+      OIDC_DISCOVERY_URL: "http://mock-oidc:9000"
+      OIDC_AUDIENCE: "sap-control-plane"
+      CORS_ORIGIN: "http://localhost:5173"
+      SEED_DEMO: "true"
+      # Telemetry. An empty endpoint is a no-op (the default profile ships no
+      # collector). The observability profile sets OTEL_EXPORTER_OTLP_ENDPOINT to
+      # http://otel-collector:4317 — see deploy/observability/README.md.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:-sap}"
+    ports:
+      - "8080:8080" # REST + SSE API
+    expose:
+      - "9090" # gRPC ToolProxy — internal only; the worker reaches it over the
+      # compose network. Not published to the host: it carries scoped credentials
+      # as metadata and (in this demo) has no transport auth.
+
+  # ---- Python agent worker (custom core; LangGraph variant is a later phase) ----
+  agent-worker:
+    build:
+      context: ../..
+      dockerfile: agent-worker/Dockerfile
+    container_name: sap-agent-worker
+    depends_on:
+      control-plane:
+        condition: service_started
+    environment:
+      WORKER_GRPC_LISTEN: ":50051"
+      TOOLPROXY_GRPC_ADDR: "control-plane:9090"
+      LLM_ENGINE: "mock"
+      LLM_MODEL: "claude-sonnet-5"
+      # Telemetry — empty endpoint is a no-op; the observability profile sets it.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      OTEL_SERVICE_NAMESPACE: "${OTEL_SERVICE_NAMESPACE:-sap}"
+    expose:
+      - "50051"
+
+  # ---- React dashboard (built static, served by nginx) ----
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    container_name: sap-frontend
+    depends_on:
+      control-plane:
+        condition: service_started
+    ports:
+      - "5173:80"
+
+  # ===================== Profile: keycloak (real IdP) ========================
+  # Swaps the mock IdP for Keycloak 26, importing the demo realm on startup.
+  # ~700MB RAM — do NOT run alongside the observability profile on a ~2GB host.
+  # The control plane is repointed at Keycloak by docker-compose.keycloak.yaml
+  # (or the env vars documented in deploy/compose/README.md).
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: sap-keycloak
+    profiles: [keycloak]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      # Dev bootstrap admin (Keycloak 26 renamed KEYCLOAK_ADMIN -> KC_BOOTSTRAP_ADMIN_*).
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Pin the browser-facing issuer so every token carries
+      #   iss = http://localhost:8081/realms/secure-agent
+      # while the control plane fetches discovery/JWKS over the Docker network at
+      # http://keycloak:8080/... . backchannel-dynamic resolves those (non-issuer)
+      # URLs from the request host, so the split matches the verifier's contract.
+      KC_HOSTNAME: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      # Cap the JVM heap for the RAM-constrained host.
+      JAVA_OPTS_KC_HEAP: "-Xms64m -Xmx512m"
+    ports:
+      - "8081:8080" # host 8081 avoids clashing with the control plane's 8080
+    volumes:
+      - ../keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+
+  # =================== Profile: observability (OTel stack) ===================
+  # otel-collector -> Jaeger (traces) + Prometheus (metrics) -> Grafana.
+  # ~1GB RAM total — do NOT run alongside the keycloak profile on a ~2GB host.
+  # Wire the app in by setting OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+  # (see deploy/compose/README.md).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    container_name: sap-otel-collector
+    profiles: [observability]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../observability/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - jaeger
+    expose:
+      - "4318" # OTLP HTTP
+      - "8889" # Prometheus metrics exposed for scraping
+    ports:
+      - "4317:4317" # OTLP gRPC (also published for host-run services)
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: sap-jaeger
+    profiles: [observability]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    expose:
+      - "4317" # Jaeger's OTLP gRPC intake (the collector exports traces here)
+    ports:
+      - "16686:16686" # Jaeger UI
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: sap-prometheus
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090" # host 9091 avoids clashing with the control plane's gRPC :9090
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: sap-grafana
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - jaeger
+    ports:
+      - "3000:3000" # Grafana UI
+
+volumes:
+  pgdata:

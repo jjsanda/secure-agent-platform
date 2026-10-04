@@ -1,0 +1,85 @@
+# ---- Go ----
+control-plane/bin/
+# Binaries from a bare `go build ./cmd/<name>` run inside control-plane/ (anchored,
+# so the cmd/<name>/ source directories stay tracked).
+/control-plane/controlplane
+/control-plane/mock-oidc
+*.test
+*.out
+coverage.out
+coverage.html
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ---- Node / frontend ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+.eslintcache
+
+# ---- Logs ----
+*.log
+
+# ---- Env / secrets (never commit real secrets) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/testdata/**/*.pem
+# Other key/cert stores and cluster credentials
+*.p12
+*.pfx
+*.jks
+*.keystore
+kubeconfig
+*.kubeconfig
+.kube/
+
+# ---- Terraform (commit .terraform.lock.hcl, ignore state + caches) ----
+**/.terraform/*
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+# Variable files carry secrets (e.g. db_password); plan files embed them too.
+*.tfvars
+*.tfvars.json
+!example.tfvars
+*.tfplan
+tfplan
+# The kind provider writes <cluster_name>-config (cluster client cert + key) into
+# the directory `terraform apply` runs from.
+deploy/terraform/**/*-config
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ---- OS / editor / local tooling ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+# Claude Code per-developer settings (a shared .claude/ config would stay tracked)
+.claude/settings.local.json
+CLAUDE.local.md

@@ -1,0 +1,23 @@
+{{- if .Values.agentWorker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "sap.fullname" . }}-agent-worker
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "sap.fullname" . }}-agent-worker
+  minReplicas: {{ .Values.agentWorker.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.agentWorker.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.agentWorker.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

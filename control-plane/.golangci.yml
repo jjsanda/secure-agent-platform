@@ -1,0 +1,16 @@
+version: "2"
+
+run:
+  # Also analyze the integration-tagged isolation tests.
+  build-tags:
+    - integration
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused — a solid, low-noise base.
+  default: standard
+  exclusions:
+    # Skip machine-generated code (sqlc, protobuf).
+    generated: lax
+    paths:
+      - internal/gen
+      - internal/db/gen

@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package sap.v1;
+
+import "google/protobuf/struct.proto";
+
+// ToolProxyService is implemented by the Go control plane and called by the
+// Python worker. The scoped credential travels as gRPC metadata
+// ("x-scoped-credential") and is validated by a server interceptor (signature ->
+// expiry/nbf -> revocation store by jti) BEFORE this handler runs. The handler
+// then enforces the request-body checks in order: run binding -> tool allow-list
+// -> global registry -> policy guard (argument schema, SSRF). Only then does the
+// tool execute. Together they are the single choke point where least privilege
+// is enforced.
+service ToolProxyService {
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
+}
+
+message ExecuteToolRequest {
+  string run_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct arguments = 3;
+  uint32 step = 4;
+}
+
+message ExecuteToolResponse {
+  oneof result {
+    ToolOk ok = 1;
+    ToolError error = 2;
+  }
+}
+
+message ToolOk {
+  google.protobuf.Struct output = 1;
+  string output_sha256 = 2; // fingerprint of the result, recorded in the audit log
+}
+
+// ErrorCode is the frozen taxonomy shared by the control plane (Go) and the
+// worker (Python). Every denial maps to exactly one code and one audit event.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_UNAUTHENTICATED = 1; // missing/invalid/expired/revoked credential
+  ERROR_CODE_OUT_OF_SCOPE = 2; // tool not in the credential's allow-list
+  ERROR_CODE_POLICY_BLOCKED = 3; // guard rejected (SSRF, path traversal, size, ...)
+  ERROR_CODE_INVALID_ARGS = 4; // arguments failed schema validation
+  ERROR_CODE_TOOL_FAILED = 5; // tool executed but returned an error
+  ERROR_CODE_RATE_LIMITED = 6; // reserved — per-run tool budget (not yet emitted)
+}
+
+message ToolError {
+  ErrorCode code = 1;
+  string message = 2;
+}

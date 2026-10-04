@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sap.fullname" . }}-control-plane
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  {{- if not .Values.controlPlane.autoscaling.enabled }}
+  replicas: {{ .Values.controlPlane.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      labels:
+        {{- include "sap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+      annotations:
+        # Roll the pods when the credential Secret changes.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "sap.serviceAccountName" . }}
+      {{- include "sap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: control-plane
+          image: {{ include "sap.image" (dict "image" .Values.controlPlane.image "ctx" $) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: CONTROL_PLANE_HTTP_ADDR
+              value: ":{{ .Values.controlPlane.service.httpPort }}"
+            - name: CONTROL_PLANE_GRPC_ADDR
+              value: ":{{ .Values.controlPlane.service.grpcPort }}"
+            - name: WORKER_GRPC_ADDR
+              value: "{{ include "sap.fullname" . }}-agent-worker:{{ .Values.agentWorker.grpcPort }}"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sap.fullname" . }}
+                  key: database-url
+            - name: MIGRATE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sap.fullname" . }}
+                  key: migrate-database-url
+            - name: MIGRATOR_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sap.fullname" . }}
+                  key: migrator-database-url
+            - name: OIDC_ISSUER_URL
+              value: {{ include "sap.oidc.issuerUrl" . | quote }}
+            - name: OIDC_DISCOVERY_URL
+              value: {{ include "sap.oidc.discoveryUrl" . | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ if .Values.keycloak.enabled }}{{ .Values.keycloak.audience | quote }}{{ else }}{{ .Values.mockOidc.audience | quote }}{{ end }}
+            - name: CORS_ORIGIN
+              value: {{ .Values.controlPlane.cors.origin | quote }}
+            - name: SEED_DEMO
+              value: {{ .Values.seedDemo | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "sap.otlpEndpoint" . | quote }}
+            - name: OTEL_SERVICE_NAMESPACE
+              value: "sap"
+          ports:
+            - name: http
+              containerPort: {{ .Values.controlPlane.service.httpPort }}
+            - name: grpc
+              containerPort: {{ .Values.controlPlane.service.grpcPort }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

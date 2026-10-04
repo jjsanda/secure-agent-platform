@@ -1,0 +1,206 @@
+# Default values for secure-agent-platform.
+# Every service is a plain Deployment/StatefulSet in one chart (no subcharts), so
+# `helm template` renders a self-contained stack. See README.md for the honest
+# "validated, not production-hardened" scope.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Shared image + scheduling knobs
+# ---------------------------------------------------------------------------
+image:
+  # Component images carry their own full repository (incl. registry). Only the
+  # pull policy / secrets are shared here.
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# Seed the two fixed demo tenants (Tenant A / Tenant B) on control-plane startup.
+seedDemo: true
+
+# Applied to every pod unless a component overrides it.
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# Postgres (three-tier role model bootstrapped by files/00-init-roles.sh)
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16"
+  db: sap
+  # Dev defaults. Override in a real deploy (or point at an external DB — see
+  # externalDatabase). These land in the chart Secret, never in a plain env.
+  bootstrapPassword: bootstrap_dev_pw
+  ownerPassword: sap_owner_dev_pw
+  appPassword: sap_app_dev_pw
+  migratorPassword: sap_migrator_dev_pw
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  # Postgres writes its data dir + runs initdb, so it cannot use a read-only
+  # rootfs. Set explicitly (not merged) to avoid the sprig merge/false gotcha.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+# Point at a managed Postgres (e.g. RDS) instead of the in-chart one.
+externalDatabase:
+  enabled: false
+  host: ""
+  port: 5432
+
+# ---------------------------------------------------------------------------
+# Control plane (REST/SSE + gRPC tool proxy)
+# ---------------------------------------------------------------------------
+controlPlane:
+  image:
+    repository: ghcr.io/jjsanda/sap-control-plane
+    tag: "" # defaults to .Chart.AppVersion
+  replicas: 1
+  service:
+    httpPort: 8080
+    grpcPort: 9090
+  cors:
+    origin: "http://localhost:5173"
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 256Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    # WARNING: scaling the control plane beyond 1 replica REQUIRES a stable,
+    # shared PASETO keypair (set secrets.pasetoPrivateKey below). Without it each
+    # replica generates its own ephemeral signing key at startup, so a credential
+    # minted by one replica fails verification on another -> intermittent tool
+    # PermissionDenied. Keep this at 1 until a shared keypair is provisioned.
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+
+# ---------------------------------------------------------------------------
+# Agent worker (gRPC RunnerService)
+# ---------------------------------------------------------------------------
+agentWorker:
+  image:
+    repository: ghcr.io/jjsanda/sap-agent-worker
+    tag: ""
+  replicas: 1
+  grpcPort: 50051
+  llm:
+    engine: mock # mock | anthropic
+    model: claude-sonnet-5
+  # anthropicApiKey: ""   # only when engine=anthropic (lands in the Secret)
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+
+# ---------------------------------------------------------------------------
+# Identity provider
+# ---------------------------------------------------------------------------
+# Bundled mock OIDC (default). Disabled automatically when keycloak.enabled.
+mockOidc:
+  enabled: true
+  image:
+    repository: ghcr.io/jjsanda/sap-mock-oidc
+    tag: ""
+  # Browser-facing issuer (token `iss`). Must match how the SPA reaches the IdP.
+  issuer: "http://localhost:9000"
+  clientId: sap-dashboard
+  audience: sap-control-plane
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 64Mi }
+
+# Real Keycloak. When enabled, mock-oidc is skipped and the control plane points
+# here. Imports files/realm-export.json (copied from deploy/keycloak/).
+keycloak:
+  enabled: false
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "26.1"
+  # Browser-facing issuer (token `iss`) — set to your ingress/host in a real deploy.
+  issuerUrl: "http://localhost:8081/realms/secure-agent"
+  audience: sap-control-plane
+  adminUser: admin
+  adminPassword: admin
+  heapOpts: "-Xms64m -Xmx512m"
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+# ---------------------------------------------------------------------------
+# Frontend (nginx-served SPA)
+# ---------------------------------------------------------------------------
+frontend:
+  enabled: true
+  image:
+    repository: ghcr.io/jjsanda/sap-frontend
+    tag: ""
+  replicas: 1
+  service:
+    port: 80
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+# ---------------------------------------------------------------------------
+# Observability — deploys an OTel collector and wires the app to it. Jaeger /
+# Prometheus / Grafana are the compose profile's job (or kube-prometheus-stack).
+# ---------------------------------------------------------------------------
+observability:
+  enabled: false
+  otelCollector:
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.116.1"
+    grpcPort: 4317
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 500m, memory: 192Mi }
+
+# ---------------------------------------------------------------------------
+# Ingress (toggleable) — routes / to the SPA and /api to the control plane.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  host: sap.local
+  tls:
+    enabled: false
+    secretName: sap-tls
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy — default-deny ingress with explicit allows.
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: true

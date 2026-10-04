@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    # RunTask legitimately streams a `RunEvent` rather than a `RunTaskResponse`;
+    # the descriptive name is clearer than the mechanical one.
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

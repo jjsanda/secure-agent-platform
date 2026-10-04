@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sap.fullname" . }}-agent-worker
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-worker
+spec:
+  {{- if not .Values.agentWorker.autoscaling.enabled }}
+  replicas: {{ .Values.agentWorker.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent-worker
+  template:
+    metadata:
+      labels:
+        {{- include "sap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-worker
+    spec:
+      serviceAccountName: {{ include "sap.serviceAccountName" . }}
+      {{- include "sap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: agent-worker
+          image: {{ include "sap.image" (dict "image" .Values.agentWorker.image "ctx" $) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: WORKER_GRPC_LISTEN
+              value: ":{{ .Values.agentWorker.grpcPort }}"
+            - name: TOOLPROXY_GRPC_ADDR
+              value: "{{ include "sap.fullname" . }}-control-plane:{{ .Values.controlPlane.service.grpcPort }}"
+            - name: LLM_ENGINE
+              value: {{ .Values.agentWorker.llm.engine | quote }}
+            - name: LLM_MODEL
+              value: {{ .Values.agentWorker.llm.model | quote }}
+            {{- if and (eq .Values.agentWorker.llm.engine "anthropic") .Values.agentWorker.anthropicApiKey }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sap.fullname" . }}
+                  key: anthropic-api-key
+            {{- end }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "sap.otlpEndpoint" . | quote }}
+            - name: OTEL_SERVICE_NAMESPACE
+              value: "sap"
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.agentWorker.grpcPort }}
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.agentWorker.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

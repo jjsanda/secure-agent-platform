@@ -1,0 +1,16 @@
+{
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#eff6ff",
+    "primaryBorderColor": "#2563eb",
+    "primaryTextColor": "#0f172a",
+    "secondaryColor": "#f5f3ff",
+    "secondaryBorderColor": "#7c3aed",
+    "tertiaryColor": "#f8fafc",
+    "lineColor": "#475569",
+    "fontFamily": "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
+    "fontSize": "15px"
+  },
+  "flowchart": { "curve": "basis", "htmlLabels": true, "padding": 12 },
+  "sequence": { "showSequenceNumbers": true, "wrap": true }
+}

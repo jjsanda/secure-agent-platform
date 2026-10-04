@@ -1,0 +1,12 @@
+%% How it works, in plain terms.
+flowchart LR
+    U(["A customer's user"]) -->|"signs in"| L["Login<br/>(proves who they are<br/>and which tenant)"]
+    L --> P["Secure Agent Platform"]
+    P -->|"can only ever see<br/>its own tenant's data"| D[("Isolated<br/>tenant data")]
+    P -->|"hands the agent a short-lived key<br/>scoped to one task"| A["AI agent"]
+    A -->|"only the allowed tools —<br/>every action checked and logged"| T["Tools"]
+
+    classDef hi fill:#2563eb,stroke:#1d4ed8,color:#ffffff;
+    classDef ag fill:#7c3aed,stroke:#6d28d9,color:#ffffff;
+    class P hi;
+    class A ag;

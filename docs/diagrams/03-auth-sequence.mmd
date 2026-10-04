@@ -1,0 +1,20 @@
+%% OIDC authorization-code + PKCE, then JWKS-validated API access.
+sequenceDiagram
+    autonumber
+    participant B as Browser (SPA)
+    participant I as OIDC Provider
+    participant C as Control Plane
+    participant D as PostgreSQL (RLS)
+
+    B->>I: /authorize (response_type=code, code_challenge=S256)
+    I-->>B: 302 redirect with authorization code
+    B->>I: /token (code + code_verifier)
+    I-->>B: access_token (JWT, aud=sap-control-plane) + id_token
+
+    Note over B,C: Every API call carries the Bearer access token
+    B->>C: GET /api/v1/runs  (Authorization: Bearer …)
+    C->>I: fetch JWKS (cached)
+    C->>C: verify signature · iss · aud · exp, then extract tenant_id
+    C->>D: WithTenant(tenant_id): set app.current_tenant, then query
+    D-->>C: only this tenant's rows (RLS)
+    C-->>B: tenant-scoped JSON

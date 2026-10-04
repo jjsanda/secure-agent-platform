@@ -1,0 +1,21 @@
+%% Agent worker internals — the worker holds ONLY a scoped credential.
+flowchart LR
+    subgraph worker["Agent Worker (Python)"]
+        direction TB
+        Core["Agent core<br/>plan → act → observe"]
+        Graph["LangGraph variant<br/>(same ports)"]
+        LLM["LLM port<br/>mock (default) · Claude"]
+        Guard["Security guard<br/>allow-list · SSRF · path · schema · injection"]
+        PC["Tool-proxy client"]
+        Core --> LLM
+        Graph --> LLM
+        Core --> Guard
+        Graph --> Guard
+        Guard --> PC
+    end
+
+    PC -->|"gRPC ExecuteTool<br/>+ scoped credential"| CP["Control Plane<br/>Tool Proxy"]
+    CP -->|"validate → execute → audit"| Tools["Allow-listed tools"]
+
+    classDef gd fill:#dc2626,stroke:#b91c1c,color:#ffffff;
+    class Guard gd;

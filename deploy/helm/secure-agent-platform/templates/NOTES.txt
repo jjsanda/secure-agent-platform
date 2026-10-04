@@ -1,0 +1,26 @@
+Secure Agent Platform — release {{ .Release.Name }} installed into {{ .Release.Namespace }}.
+
+Identity provider : {{ if .Values.keycloak.enabled }}Keycloak (realm secure-agent){{ else }}bundled mock OIDC{{ end }}
+Database          : {{ if .Values.externalDatabase.enabled }}external ({{ .Values.externalDatabase.host }}){{ else }}in-chart Postgres{{ end }}
+Telemetry         : {{ if .Values.observability.enabled }}OTLP -> {{ include "sap.otlpEndpoint" . }}{{ else }}disabled (no-op){{ end }}
+Autoscaling       : control-plane={{ .Values.controlPlane.autoscaling.enabled }} worker={{ .Values.agentWorker.autoscaling.enabled }}
+
+1. Watch the pods come up:
+   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+{{- if .Values.ingress.enabled }}
+
+2. The API + dashboard are exposed via Ingress at:
+   http://{{ .Values.ingress.host }}/        (dashboard)
+   http://{{ .Values.ingress.host }}/api/     (control-plane API)
+{{- else }}
+
+2. No Ingress. Port-forward to reach the services locally:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sap.fullname" . }}-frontend 5173:{{ .Values.frontend.service.port }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sap.fullname" . }}-control-plane 8080:{{ .Values.controlPlane.service.httpPort }}
+{{- end }}
+
+3. Demo logins (fixed tenants): alice/alice (Tenant A admin), bob/bob (Tenant B member).
+
+NOTE: this chart is validated (helm lint + kubeconform), not production-hardened.
+See the chart README.md.

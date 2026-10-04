@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package sap.v1;
+
+// AgentVariant selects which agent implementation the worker uses for a run.
+// Both share the same security guard, tool-proxy client, and LLM port.
+enum AgentVariant {
+  AGENT_VARIANT_UNSPECIFIED = 0;
+  AGENT_VARIANT_CUSTOM = 1; // hand-written plan -> act -> observe loop
+  AGENT_VARIANT_LANGGRAPH = 2; // LangGraph StateGraph variant
+}
+
+// ModelConfig describes the LLM backing a run. The deterministic mock engine is
+// the default and requires no API key.
+message ModelConfig {
+  string engine = 1; // "mock" | "anthropic"
+  string model = 2; // e.g. "claude-sonnet-5" (ignored by the mock engine)
+  string effort = 3; // optional: "low|medium|high|xhigh|max" (Sonnet/Opus only)
+}

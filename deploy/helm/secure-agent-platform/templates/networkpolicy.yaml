@@ -1,0 +1,64 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+Default-deny ingress for the release, then two explicit allows:
+  1. intra-release traffic (control-plane <-> worker <-> postgres <-> idp),
+  2. external ingress to the web tiers (frontend :80, control-plane API :8080).
+Note: Postgres is never reachable from outside the app.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sap.fullname" . }}-default-deny-ingress
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sap.fullname" . }}-allow-intra
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Any pod of this release may talk to any other pod of this release.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "sap.selectorLabels" . | nindent 14 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sap.fullname" . }}-allow-web
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["frontend", "control-plane"]
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: ["{{ .Release.Name }}"]
+  policyTypes:
+    - Ingress
+  ingress:
+    # Reachable by the ingress controller (any namespace) on the web ports.
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: {{ .Values.controlPlane.service.httpPort }}
+{{- end }}

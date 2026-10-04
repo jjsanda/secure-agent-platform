@@ -1,0 +1,21 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/jjsanda/secure-agent-platform/control-plane/internal/gen/proto
+plugins:
+  # --- Go (control plane) ---
+  - remote: buf.build/protocolbuffers/go
+    out: ../control-plane/internal/gen/proto
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go
+    out: ../control-plane/internal/gen/proto
+    opt: paths=source_relative
+  # --- Python (agent worker) ---
+  - remote: buf.build/protocolbuffers/python
+    out: ../agent-worker/src/sap_worker/gen
+  - remote: buf.build/protocolbuffers/pyi
+    out: ../agent-worker/src/sap_worker/gen
+  - remote: buf.build/grpc/python
+    out: ../agent-worker/src/sap_worker/gen

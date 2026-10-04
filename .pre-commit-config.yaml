@@ -1,0 +1,40 @@
+# Run `pre-commit install` once, then hooks run on every commit.
+# Install pre-commit with `uv tool install pre-commit` or `pipx install pre-commit`.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^agent-worker/
+      - id: ruff-format
+        files: ^agent-worker/
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'cd control-plane && gofmt -l -w $(git diff --cached --name-only --diff-filter=ACM -- "*.go" | sed "s#control-plane/##")'
+        language: system
+        files: ^control-plane/.*\.go$
+        pass_filenames: false
+      - id: buf-lint
+        name: buf lint
+        entry: bash -c 'cd proto && buf lint'
+        language: system
+        files: ^proto/.*\.proto$
+        pass_filenames: false

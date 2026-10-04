@@ -1,0 +1,119 @@
+{{- if .Values.observability.enabled }}
+{{- /*
+Minimal in-cluster OTel collector so the app's OTLP export has a sink. Traces go
+to the collector's debug log and metrics are re-exposed on :8889. Wiring a real
+tracing backend (Tempo/Jaeger) or kube-prometheus-stack is left to the platform;
+the compose observability profile ships the full Jaeger+Prometheus+Grafana stack.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sap.fullname" . }}-otel-collector
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      memory_limiter:
+        check_interval: 2s
+        limit_mib: 128
+        spike_limit_mib: 32
+      batch:
+        timeout: 5s
+    exporters:
+      prometheus:
+        endpoint: 0.0.0.0:8889
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [prometheus, debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sap.fullname" . }}-otel-collector
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: otel-collector
+  template:
+    metadata:
+      labels:
+        {{- include "sap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: otel-collector
+      annotations:
+        checksum/config: {{ .Values.observability.otelCollector | toYaml | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "sap.serviceAccountName" . }}
+      {{- include "sap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: otel-collector
+          image: {{ include "sap.image" (dict "image" .Values.observability.otelCollector.image "ctx" $) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config=/etc/otelcol/config.yaml"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: prom
+              containerPort: 8889
+          resources:
+            {{- toYaml .Values.observability.otelCollector.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "sap.fullname" . }}-otel-collector
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sap.fullname" . }}-otel-collector
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "sap.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: prom
+      port: 8889
+      targetPort: prom
+{{- end }}

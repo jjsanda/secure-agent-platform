@@ -1,0 +1,37 @@
+# Dev overlay: own namespace, scaled control plane, tighter resources, :dev tags.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sap-dev
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+labels:
+  - pairs:
+      app.kubernetes.io/environment: dev
+    includeSelectors: false
+
+# Scale the stateless hot path in dev.
+replicas:
+  - name: sap-control-plane
+    count: 2
+
+# Tighten control-plane resources for the dev cluster.
+patches:
+  - path: patch-control-plane-resources.yaml
+    target:
+      kind: Deployment
+      name: sap-control-plane
+
+# Pin dev image tags without editing the base manifests.
+images:
+  - name: ghcr.io/jjsanda/sap-control-plane
+    newTag: dev
+  - name: ghcr.io/jjsanda/sap-agent-worker
+    newTag: dev
+  - name: ghcr.io/jjsanda/sap-mock-oidc
+    newTag: dev
+  - name: ghcr.io/jjsanda/sap-frontend
+    newTag: dev

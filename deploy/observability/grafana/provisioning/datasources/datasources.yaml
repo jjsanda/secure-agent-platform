@@ -1,0 +1,25 @@
+# Grafana provisioned datasources (Prometheus + Jaeger). Loaded at startup, so
+# Grafana comes up already wired — no click-ops. UIDs are stable so the bundled
+# dashboard can reference them.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: sap-prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+
+  - name: Jaeger
+    type: jaeger
+    uid: sap-jaeger
+    access: proxy
+    url: http://jaeger:16686
+    jsonData:
+      # Let trace views pivot to the matching metrics datasource.
+      tracesToMetrics:
+        datasourceUid: sap-prometheus

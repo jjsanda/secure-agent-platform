@@ -1,0 +1,51 @@
+{{- if and .Values.mockOidc.enabled (not .Values.keycloak.enabled) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sap.fullname" . }}-mock-oidc
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mock-oidc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mock-oidc
+  template:
+    metadata:
+      labels:
+        {{- include "sap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mock-oidc
+    spec:
+      serviceAccountName: {{ include "sap.serviceAccountName" . }}
+      {{- include "sap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mock-oidc
+          image: {{ include "sap.image" (dict "image" .Values.mockOidc.image "ctx" $) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: MOCK_OIDC_ADDR
+              value: ":9000"
+            - name: MOCK_OIDC_ISSUER
+              value: {{ .Values.mockOidc.issuer | quote }}
+            - name: MOCK_OIDC_CLIENT_ID
+              value: {{ .Values.mockOidc.clientId | quote }}
+            - name: MOCK_OIDC_API_AUDIENCE
+              value: {{ .Values.mockOidc.audience | quote }}
+          ports:
+            - name: http
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /.well-known/openid-configuration
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.mockOidc.resources | nindent 12 }}
+{{- end }}

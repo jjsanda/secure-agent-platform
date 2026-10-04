@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package sap.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "sap/v1/common.proto";
+
+// RunnerService is implemented by the Python agent worker and called by the Go
+// control plane. The control plane dispatches a task together with a short-lived
+// scoped credential; the worker streams events back as it plans, calls tools
+// (through the control plane's tool proxy), observes results, and finishes.
+service RunnerService {
+  rpc RunTask(RunTaskRequest) returns (stream RunEvent);
+}
+
+message RunTaskRequest {
+  string run_id = 1;
+  string tenant_id = 2;
+  string objective = 3;
+  // Tools this run is permitted to call. Mirrors the scoped credential's claim
+  // and is re-checked server-side by the tool proxy — never trusted alone.
+  repeated string allowed_tools = 4;
+  // PASETO v4.public capability token scoped to {run_id, tenant_id,
+  // allowed_tools, exp}. The worker holds ONLY this token — no DB or tool creds.
+  string scoped_credential = 5;
+  ModelConfig model = 6;
+  AgentVariant variant = 7;
+  uint32 max_steps = 8;
+}
+
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_PLANNING = 1;
+  RUN_STATUS_ACTING = 2;
+  RUN_STATUS_OBSERVING = 3;
+  RUN_STATUS_SUCCEEDED = 4;
+  RUN_STATUS_FAILED = 5;
+}
+
+// RunEvent is one item in the streamed trace of a run. The control plane relays
+// these to the dashboard over Server-Sent Events and records them for audit.
+message RunEvent {
+  google.protobuf.Timestamp at = 1;
+  uint32 step = 2;
+  oneof event {
+    StatusChange status = 3;
+    PlanProduced plan = 4;
+    LlmMessage llm_message = 5;
+    ToolCallRequested tool_requested = 6;
+    ToolCallResult tool_result = 7;
+    FinalAnswer final = 8;
+    RunError error = 9;
+  }
+}
+
+message StatusChange {
+  RunStatus status = 1;
+}
+
+message PlanProduced {
+  repeated string steps = 1;
+}
+
+message LlmMessage {
+  string role = 1; // "system" | "assistant" | "user"
+  string content = 2;
+}
+
+message ToolCallRequested {
+  string tool_name = 1;
+  google.protobuf.Struct arguments = 2;
+}
+
+message ToolCallResult {
+  string tool_name = 1;
+  bool ok = 2;
+  string detail = 3; // human-readable summary; full output stays server-side
+}
+
+message FinalAnswer {
+  string answer = 1;
+}
+
+message RunError {
+  string message = 1;
+}

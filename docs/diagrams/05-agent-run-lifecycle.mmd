@@ -1,0 +1,19 @@
+%% Agent run lifecycle — the states streamed live to the dashboard.
+stateDiagram-v2
+    [*] --> pending
+    pending --> planning: dispatch to worker
+    planning --> acting: plan produced
+    acting --> observing: tool result (via tool proxy)
+    acting --> succeeded: final answer (no tool needed)
+    observing --> observing: further steps (more tools)
+    observing --> succeeded: final answer
+    planning --> failed: error
+    acting --> failed: tool denied / error
+    observing --> failed: tool denied / error
+    succeeded --> [*]
+    failed --> [*]
+
+    note right of acting
+        Every tool call is validated by the
+        tool proxy before it runs, and audited.
+    end note

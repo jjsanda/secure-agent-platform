@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sap-mock-oidc
+  labels:
+    app.kubernetes.io/name: mock-oidc
+    app.kubernetes.io/component: mock-oidc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mock-oidc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mock-oidc
+        app.kubernetes.io/component: mock-oidc
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mock-oidc
+          image: ghcr.io/jjsanda/sap-mock-oidc:0.1.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: MOCK_OIDC_ADDR
+              value: ":9000"
+            - name: MOCK_OIDC_ISSUER
+              value: "http://localhost:9000"
+            - name: MOCK_OIDC_CLIENT_ID
+              value: "sap-dashboard"
+            - name: MOCK_OIDC_API_AUDIENCE
+              value: "sap-control-plane"
+          ports:
+            - name: http
+              containerPort: 9000
+          readinessProbe:
+            httpGet: { path: /.well-known/openid-configuration, port: http }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 200m, memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sap-mock-oidc
+  labels:
+    app.kubernetes.io/component: mock-oidc
+spec:
+  selector:
+    app.kubernetes.io/name: mock-oidc
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http

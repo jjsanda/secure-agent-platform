@@ -1,0 +1,18 @@
+{{- if and .Values.mockOidc.enabled (not .Values.keycloak.enabled) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sap.fullname" . }}-mock-oidc
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mock-oidc
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "sap.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mock-oidc
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http
+{{- end }}

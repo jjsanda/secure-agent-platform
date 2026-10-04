@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sap-control-plane
+  labels:
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: control-plane
+        app.kubernetes.io/component: control-plane
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: control-plane
+          image: ghcr.io/jjsanda/sap-control-plane:0.1.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CONTROL_PLANE_HTTP_ADDR
+              value: ":8080"
+            - name: CONTROL_PLANE_GRPC_ADDR
+              value: ":9090"
+            - name: WORKER_GRPC_ADDR
+              value: "sap-agent-worker:50051"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: sap-db, key: database-url }
+            - name: MIGRATE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: sap-db, key: migrate-database-url }
+            - name: MIGRATOR_DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: sap-db, key: migrator-database-url }
+            - name: OIDC_ISSUER_URL
+              value: "http://localhost:9000"
+            - name: OIDC_DISCOVERY_URL
+              value: "http://sap-mock-oidc:9000"
+            - name: OIDC_AUDIENCE
+              value: "sap-control-plane"
+            - name: CORS_ORIGIN
+              value: "http://localhost:5173"
+            - name: SEED_DEMO
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: grpc
+              containerPort: 9090
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 256Mi }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sap-control-plane
+  labels:
+    app.kubernetes.io/component: control-plane
+spec:
+  selector:
+    app.kubernetes.io/name: control-plane
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: grpc
+      port: 9090
+      targetPort: grpc

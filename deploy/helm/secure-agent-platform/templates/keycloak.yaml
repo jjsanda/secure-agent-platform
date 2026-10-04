@@ -1,0 +1,113 @@
+{{- if .Values.keycloak.enabled }}
+{{- $base := .Values.keycloak.issuerUrl | trimSuffix "/realms/secure-agent" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sap.fullname" . }}-keycloak-realm
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+data:
+  realm-export.json: |
+{{ .Files.Get "files/realm-export.json" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sap.fullname" . }}-keycloak
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "sap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: keycloak
+  template:
+    metadata:
+      labels:
+        {{- include "sap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: keycloak
+    spec:
+      serviceAccountName: {{ include "sap.serviceAccountName" . }}
+      {{- include "sap.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          image: {{ include "sap.image" (dict "image" .Values.keycloak.image "ctx" $) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["start-dev", "--import-realm"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Keycloak dev mode writes an embedded H2 DB under /opt/keycloak/data.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: {{ .Values.keycloak.adminUser | quote }}
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: {{ .Values.keycloak.adminPassword | quote }}
+            # Pin the browser-facing issuer; resolve backchannel (discovery/JWKS)
+            # URLs from the in-cluster request host so the control plane can reach
+            # them at the Service name.
+            - name: KC_HOSTNAME
+              value: {{ $base | quote }}
+            - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+              value: "true"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: JAVA_OPTS_KC_HEAP
+              value: {{ .Values.keycloak.heapOpts | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.keycloak.resources | nindent 12 }}
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: {{ include "sap.fullname" . }}-keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sap.fullname" . }}-keycloak
+  labels:
+    {{- include "sap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "sap.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

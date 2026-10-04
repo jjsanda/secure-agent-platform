@@ -1,0 +1,15 @@
+%% Defense-in-depth tenant isolation: how one request is confined to one tenant.
+flowchart TB
+    JWT["Verified JWT<br/>tenant_id claim"] --> MW["Auth middleware<br/>(extract tenant_id)"]
+    MW --> WT["WithTenant(tx):<br/>set_config('app.current_tenant', tenant_id, local)"]
+    WT --> Q["sqlc query<br/>(no tenant_id filter written by hand)"]
+    Q --> POL{"RLS policy — FORCE<br/>USING + WITH CHECK<br/>tenant_id = current_setting(…)"}
+    POL -->|"matches current tenant"| OWN[("Only this tenant's rows")]
+    POL -->|"other tenant / no context"| DENY["0 rows · INSERT rejected<br/>(fail-closed)"]
+
+    classDef pol fill:#dc2626,stroke:#b91c1c,color:#ffffff;
+    classDef own fill:#16a34a,stroke:#15803d,color:#ffffff;
+    classDef deny fill:#475569,stroke:#334155,color:#ffffff;
+    class POL pol;
+    class OWN own;
+    class DENY deny;

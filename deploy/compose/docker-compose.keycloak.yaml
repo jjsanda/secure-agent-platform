@@ -1,0 +1,28 @@
+# Keycloak override — layer ON TOP of docker-compose.yaml WITH the keycloak
+# profile to repoint the whole stack at Keycloak in one command:
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.keycloak.yaml \
+#     --profile keycloak up -d --build
+#
+# The base file already defines the `keycloak` service (profiles: [keycloak]);
+# this override only rewires the control plane and rebuilds the SPA against the
+# Keycloak issuer. The default (mock-oidc) profile is left untouched.
+name: secure-agent-platform
+
+services:
+  control-plane:
+    environment:
+      # Browser-facing issuer (token `iss`). Must equal Keycloak's frontend URL.
+      OIDC_ISSUER_URL: "http://localhost:8081/realms/secure-agent"
+      # Where the backend fetches discovery/JWKS (Docker-internal host:port).
+      OIDC_DISCOVERY_URL: "http://keycloak:8080/realms/secure-agent"
+      OIDC_AUDIENCE: "sap-control-plane"
+
+  # The SPA bakes VITE_* at build time, so switching IdP means a rebuild.
+  frontend:
+    build:
+      args:
+        VITE_API_BASE_URL: "http://localhost:8080"
+        VITE_OIDC_ISSUER: "http://localhost:8081/realms/secure-agent"
+        VITE_OIDC_CLIENT_ID: "sap-dashboard"
+        VITE_OIDC_REDIRECT_URI: "http://localhost:5173/callback"

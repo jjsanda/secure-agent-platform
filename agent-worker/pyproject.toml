@@ -1,0 +1,189 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sap-worker"
+version = "0.1.0"
+description = "Secure Agent Platform — Python agent worker. Runs the plan/act/observe loop, holds only a short-lived scoped credential, and routes every side effect through the control-plane tool proxy over gRPC."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Josef Sanda", email = "pepek.svanda@gmail.com" }]
+keywords = [
+    "agent",
+    "llm",
+    "grpc",
+    "least-privilege",
+    "tool-proxy",
+    "prompt-injection",
+    "security",
+]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+
+# Core runtime deps are kept light so the *offline-deterministic* default stack
+# (mock LLM, no API key) installs with no provider client and no telemetry SDK.
+# Real Claude, the LangGraph variant, and OpenTelemetry live behind extras.
+dependencies = [
+    "grpcio>=1.66",
+    # The committed gRPC stubs are gencode 7.35.1; the protobuf runtime must be
+    # >= the gencode version or import fails ValidateProtobufRuntimeVersion.
+    "protobuf>=7.35.1",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "structlog>=24.1",
+    "rich>=13.7",
+    "pyyaml>=6.0.1",
+    "tenacity>=8.5",
+]
+
+[project.optional-dependencies]
+# --- Real LLM provider (next phase; the mock engine needs none of this) ---
+anthropic = ["anthropic>=0.40"]
+# --- LangGraph StateGraph agent variant (next phase) ---
+langgraph = ["langgraph>=0.2.50"]
+# --- OpenTelemetry traces export + gRPC instrumentation (next phase) ---
+otel = [
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-grpc",
+]
+
+[project.scripts]
+sap-worker = "sap_worker.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/jjsanda/secure-agent-platform"
+Repository = "https://github.com/jjsanda/secure-agent-platform"
+
+# uv dependency group (PEP 735) for dev/test tooling, not shipped with the package.
+#
+# NOTE: grpcio-tools is intentionally omitted. `make proto` regenerates the stubs
+# with buf's remote plugins and then runs scripts/fix-python-protos.sh, a pure
+# shell rewrite — neither uses grpcio-tools. More importantly, every *stable*
+# grpcio-tools release pins protobuf<7, which is incompatible with the committed
+# gencode (protobuf 7.35.1); the only prerelease that supports protobuf 7 is
+# version-locked to a prerelease grpcio runtime. Omitting it keeps the runtime on
+# stable protobuf 7.35.1 and `uv sync --all-extras --dev` satisfiable.
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "black>=24.8",
+    "mypy>=1.11",
+    "types-protobuf",
+    "types-pyyaml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sap_worker"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/sap_worker", "README.md"]
+
+# --------------------------------------------------------------------------------------
+# Tooling configuration
+# --------------------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+# Generated gRPC stubs are not ours to lint or format.
+extend-exclude = ["src/sap_worker/gen"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # flake8-bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TID",       # tidy-imports
+    "PTH",       # use-pathlib
+    "RUF",       # ruff-specific
+]
+ignore = [
+    "E501",    # line length handled by black
+    "N818",    # domain exception names (ToolNotAllowed, ...) read better without an Error suffix
+    "RUF022",  # keep __all__ grouped by category (curated) rather than alphabetised
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["N802", "N803", "S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sap_worker"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = '''
+/(
+  src/sap_worker/gen
+)/
+'''
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+explicit_package_bases = true
+namespace_packages = true
+# The generated stubs are typed by their own .pyi; don't type-check the .py directly.
+exclude = ['^src/sap_worker/gen/']
+
+# grpcio ships no type information.
+[[tool.mypy.overrides]]
+module = ["grpc", "grpc.*"]
+ignore_missing_imports = true
+
+# The *_pb2 message modules are typed via their generated .pyi (kept). The *_grpc
+# service modules have no stubs, so treat them as an untyped boundary rather than
+# type-checking generated code under --strict.
+[[tool.mypy.overrides]]
+module = [
+    "sap_worker.gen.sap.v1.common_pb2_grpc",
+    "sap_worker.gen.sap.v1.runner_pb2_grpc",
+    "sap_worker.gen.sap.v1.toolproxy_pb2_grpc",
+]
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: fast, isolated unit tests (no network, no gRPC)",
+    "injection: prompt-injection corpus (adversarial objectives / tool outputs) — next phase",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["sap_worker"]
+omit = ["*/__main__.py", "*/gen/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+    "if __name__ == .__main__.:",
+]

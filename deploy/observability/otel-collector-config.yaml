@@ -1,0 +1,63 @@
+# OpenTelemetry Collector (contrib) — receives OTLP from the control plane and
+# agent worker, fans traces out to Jaeger and exposes metrics for Prometheus.
+#
+# The control plane / worker export to otel-collector:4317 when
+# OTEL_EXPORTER_OTLP_ENDPOINT is set (observability profile). An empty endpoint
+# is a no-op in the app, so the default profile ships no collector at all.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Guard rails for the RAM-constrained host: cap the collector's own heap and
+  # batch exports so it never balloons.
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 128
+    spike_limit_mib: 32
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  # Traces -> Jaeger (all-in-one) over OTLP gRPC.
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  # Metrics -> Prometheus scrape endpoint on :8889 (Prometheus pulls from here).
+  # resource attributes are surfaced as labels so service.name etc. are queryable.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+  # Low-noise stdout for `docker logs sap-otel-collector`.
+  debug:
+    verbosity: basic
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, debug]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: basic

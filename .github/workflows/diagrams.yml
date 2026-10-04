@@ -1,0 +1,40 @@
+name: Diagrams
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/diagrams/**"]
+  pull_request:
+    paths: ["docs/diagrams/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: mermaid sources render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Verify every diagram source is valid Mermaid (renders without error). We
+      # do NOT diff against the committed SVG/PNG: headless-Chromium rendering is
+      # not byte-reproducible across environments, so a strict drift check would
+      # be flaky. The committed exports are produced with `make diagrams`.
+      - name: Render all diagrams
+        run: |
+          mkdir -p /tmp/diagram-check
+          rc=0
+          for f in docs/diagrams/*.mmd; do
+            base="$(basename "${f%.mmd}")"
+            if ! npx -y @mermaid-js/mermaid-cli \
+                 -i "$f" -o "/tmp/diagram-check/${base}.svg" \
+                 -c docs/diagrams/mermaid.config.json \
+                 -p docs/diagrams/puppeteer.config.json; then
+              echo "::error file=${f}::diagram failed to render"
+              rc=1
+            fi
+          done
+          exit $rc

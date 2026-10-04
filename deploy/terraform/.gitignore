@@ -1,0 +1,15 @@
+# Terraform working files — never commit provider caches or state.
+**/.terraform/
+**/.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+# Keep the lock file (.terraform.lock.hcl) and .tf sources.
+*.tfvars
+*.tfvars.json
+!example.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

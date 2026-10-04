@@ -1,0 +1,37 @@
+# Minimal base: the five core services as plain Deployments/Services. Helm is the
+# primary path (keycloak/observability/HPA/ingress live there); this base covers
+# the kustomize path — generators + the dev overlay's patches/replicas/images.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - postgres.yaml
+  - mock-oidc.yaml
+  - control-plane.yaml
+  - agent-worker.yaml
+  - frontend.yaml
+
+# part-of on metadata only (not selectors, so matchLabels stay stable).
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: secure-agent-platform
+    includeSelectors: false
+
+# Bootstrap script -> ConfigMap; references in postgres.yaml are auto-rewritten
+# to the hashed name.
+configMapGenerator:
+  - name: postgres-initdb
+    files:
+      - 00-init-roles.sh
+
+# Dev credentials + fully-formed connection URLs -> Secret (hashed name).
+secretGenerator:
+  - name: sap-db
+    literals:
+      - postgres-bootstrap-password=bootstrap_dev_pw
+      - postgres-owner-password=sap_owner_dev_pw
+      - postgres-app-password=sap_app_dev_pw
+      - postgres-migrator-password=sap_migrator_dev_pw
+      - database-url=postgres://sap_app:sap_app_dev_pw@sap-postgres:5432/sap?sslmode=disable
+      - migrate-database-url=pgx5://sap_owner:sap_owner_dev_pw@sap-postgres:5432/sap?sslmode=disable
+      - migrator-database-url=postgres://sap_migrator:sap_migrator_dev_pw@sap-postgres:5432/sap?sslmode=disable

@@ -1,0 +1,19 @@
+apiVersion: v2
+name: secure-agent-platform
+description: >-
+  Umbrella chart for the Secure Agent Platform — a multi-tenant agent runtime
+  (Go control plane + Python worker) with Postgres RLS isolation, a pluggable
+  OIDC provider (bundled mock or Keycloak) and optional OpenTelemetry.
+type: application
+# Chart is versioned independently of the app it ships.
+version: 0.1.0
+# Default image tag when a component leaves image.tag empty.
+appVersion: "0.1.0"
+keywords:
+  - agents
+  - multi-tenant
+  - oidc
+  - postgres-rls
+home: https://github.com/jjsanda/secure-agent-platform
+maintainers:
+  - name: Secure Agent Platform

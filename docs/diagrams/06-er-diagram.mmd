@@ -1,0 +1,48 @@
+%% Data model — every tenant table carries tenant_id and is protected by RLS.
+erDiagram
+    tenant ||--o{ account : "has"
+    tenant ||--o{ run : "owns"
+    tenant ||--o{ audit_log : "records"
+    account |o--o{ run : "creates"
+    run ||--o{ run_event : "streams"
+    run ||--o{ scoped_credential : "mints"
+
+    tenant {
+        uuid id PK
+        text slug UK
+        text name
+    }
+    account {
+        uuid id PK
+        uuid tenant_id FK
+        text subject UK
+        text_array roles
+    }
+    run {
+        uuid id PK
+        uuid tenant_id FK
+        text objective
+        text status
+        text final_answer
+    }
+    run_event {
+        bigint id PK
+        uuid tenant_id FK
+        uuid run_id FK
+        text kind
+        jsonb payload
+    }
+    scoped_credential {
+        uuid jti PK
+        uuid tenant_id FK
+        uuid run_id FK
+        timestamptz expires_at
+        timestamptz revoked_at
+    }
+    audit_log {
+        bigint id PK
+        uuid tenant_id FK
+        text actor
+        text action
+        jsonb detail
+    }

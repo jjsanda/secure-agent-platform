@@ -1,0 +1,27 @@
+%% System architecture (containers).
+flowchart TB
+    subgraph browser["Browser"]
+        FE["React Dashboard<br/>(Vite · TS · shadcn/ui)"]
+    end
+
+    subgraph idp["Identity provider"]
+        OIDC["Keycloak&nbsp;/&nbsp;mock-OIDC<br/>(OIDC · OAuth2 · PKCE)"]
+    end
+
+    subgraph platform["secure-agent-platform"]
+        CP["Go Control Plane<br/>REST · SSE · gRPC ToolProxy<br/>auth · scoped creds · audit"]
+        W["Python Agent Worker<br/>custom core + LangGraph"]
+        DB[("PostgreSQL<br/>row-level security")]
+    end
+
+    FE -->|"REST + JWT"| CP
+    FE -->|"auth-code + PKCE"| OIDC
+    CP -->|"validate JWT via JWKS"| OIDC
+    CP -->|"tenant-scoped queries (RLS)"| DB
+    CP -->|"gRPC RunTask (stream)<br/>+ scoped credential"| W
+    W -->|"gRPC ExecuteTool<br/>x-scoped-credential"| CP
+
+    classDef cp fill:#2563eb,stroke:#1d4ed8,color:#ffffff;
+    classDef wk fill:#7c3aed,stroke:#6d28d9,color:#ffffff;
+    class CP cp;
+    class W wk;

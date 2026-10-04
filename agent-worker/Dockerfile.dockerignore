@@ -1,0 +1,14 @@
+# BuildKit reads this file (named <dockerfile>.dockerignore) for the agent-worker
+# image. Patterns are relative to the build context (the repo root). Keep local
+# virtualenvs, caches, and build artifacts out of the image.
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.git
+**/*.egg-info
+**/htmlcov
+**/.coverage
